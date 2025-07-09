@@ -1,0 +1,12 @@
+{
+  "Version": 1,
+  "Hash": "AOY1fdKbJY4s58FmaWWChFJrfb1zaGitB42cWWUBTfk=",
+  "Source": "notification-service",
+  "BasePath": "_content/notification-service",
+  "Mode": "Default",
+  "ManifestType": "Build",
+  "ReferencedProjectsConfiguration": [],
+  "DiscoveryPatterns": [],
+  "Assets": [],
+  "Endpoints": []
+}
