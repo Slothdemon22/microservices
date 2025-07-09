@@ -2,11 +2,16 @@ using Npgsql;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using System.Text;
+using Microsoft.EntityFrameworkCore;
+using NotificationService;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddOpenApi();
+builder.Services.AddDbContext<NotificationDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 var app = builder.Build();
 
@@ -25,7 +30,7 @@ catch (Exception ex)
 }
 
 // Start RabbitMQ consumer in background
-Task.Run(() =>
+Task.Run(async () =>
 {
     try
     {
@@ -42,11 +47,35 @@ Task.Run(() =>
         var queue = rabbitConfig["Queue"] ?? "order_notifications";
         channel.QueueDeclare(queue: queue, durable: false, exclusive: false, autoDelete: false, arguments: null);
         var consumer = new EventingBasicConsumer(channel);
-        consumer.Received += (model, ea) =>
+        consumer.Received += async (model, ea) =>
         {
             var body = ea.Body.Span.ToArray();
             var message = Encoding.UTF8.GetString(body);
             app.Logger.LogInformation($"Received message from RabbitMQ: {message}");
+            
+            // Save notification to DB
+            try
+            {
+                using var scope = app.Services.CreateScope();
+                var dbContext = scope.ServiceProvider.GetRequiredService<NotificationDbContext>();
+                var orderEvent = JsonSerializer.Deserialize<OrderEvent>(message);
+                if (orderEvent != null)
+                {
+                    var notification = new Notification
+                    {
+                        OrderId = orderEvent.Id,
+                        Description = orderEvent.Description,
+                        ReceivedAt = DateTime.UtcNow
+                    };
+                    dbContext.Notifications.Add(notification);
+                    await dbContext.SaveChangesAsync();
+                    app.Logger.LogInformation($"Notification saved to DB for Order {orderEvent.Id}");
+                }
+            }
+            catch (Exception ex)
+            {
+                app.Logger.LogError(ex, "Failed to save notification to DB");
+            }
         };
         channel.BasicConsume(queue: queue, autoAck: true, consumer: consumer);
         app.Logger.LogInformation("RabbitMQ consumer started successfully");
@@ -79,3 +108,11 @@ app.UseHttpsRedirection();
 app.MapGet("/", () => "Notification Service - RabbitMQ Consumer");
 
 app.Run();
+
+// DTO for deserializing order events
+public class OrderEvent
+{
+    public int Id { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+}
